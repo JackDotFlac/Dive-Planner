@@ -2,16 +2,7 @@ import 'dart:math';
 import 'gases.dart';
 import 'waypoints.dart';
 
-class DecompressionPlan {
-  late String icon;
-  late String depth;
-  late String duration;
-  late String runtime;
-  late String gas;
-  late String info;
-
-  DecompressionPlan(this.icon, this.depth, this.duration, this.runtime, this.gas, this.info);
-}
+const surfacePressure = 1.0; // remove to allow altitude diving
 
 class GasMix {
   double oxygen;
@@ -44,10 +35,17 @@ DecoWaypoint decoWaypointFromWaypoint(Waypoint waypoint) {
 }
 
 class TissueCompartments {
-  double helium;
-  double nitrogen;
+  late double helium;
+  late double nitrogen;
 
-  TissueCompartments(this.helium, this.nitrogen);
+  resetTissueState() {
+    helium = 0.0;
+    nitrogen = 0.79;
+  }
+
+  TissueCompartments() {
+    resetTissueState();
+  }
 }
 
 class CompartmentGasParameters {
@@ -69,7 +67,6 @@ class CompartmentParameters {
 }
 
 class Buhlmann {
-  List<DecompressionPlan> plan = [];
   // Placeholder
   List<double> nitrogenHalfTime = [5.0000, 8.0000, 12.500, 18.500, 27.000, 38.300, 54.300, 77.000, 109.00, 146.00, 187.00, 239.00, 305.00, 390.00, 498.00, 635.00];
   List<double> nitrogenAValue = [1.1696, 1.0000, 0.8618, 0.7562, 0.6200, 0.5043, 0.4410, 0.4000, 0.3750, 0.3500, 0.3295, 0.3065, 0.2835, 0.2610, 0.2480, 0.2327];
@@ -83,7 +80,6 @@ class Buhlmann {
   // Placeholder variables, these should go info their own settings class ASAP
   static const waterVapourPressure = 0.0627;
   static const log2 = 0.69314718056;
-  static const surfacePressure = 1.0;
 
   Buhlmann() {
     for (var i = 0; i < 16; i++) {
@@ -96,7 +92,7 @@ class Buhlmann {
     for (var i = 0; i < 16; i++) {
       tissueCompartments.add(
         // Also a placeholder, impliment a way to load tissue... loading...
-        TissueCompartments(0.0, 0.79)
+        TissueCompartments()
       );
     }
   }
@@ -190,71 +186,19 @@ class Buhlmann {
       return maxCeiling;
   }
 
-  GasMix getBestMix(List<GasMix> gasMixes, ambientPressure) {
-    GasMix bestMix = gasMixes[0];
-    for (var gas in gasMixes) {
-      if (gas.oxygen > bestMix.oxygen && gas.oxygen * ambientPressure < 1.6) {
-        bestMix = gas;
-      }
-    }
-    return bestMix;
-  }
-
   void resetDecompressionState() {
-    Buhlmann();
-  }
-
-  void calculatePlan(List<Gas> gases, List<Waypoint> waypoints) {
-    plan.clear();
-    List<GasMix> gasMixes = [];
-    List<DecoWaypoint> decoWaypoints = [];
-
-    for (var gas in gases) {
-      gasMixes.add(gasMixFromGas(gas));
-    }
-
-    for (var waypoint in waypoints) {
-      decoWaypoints.add(decoWaypointFromWaypoint(waypoint));
-    }
-
-    if (gasMixes.isEmpty || decoWaypoints.isEmpty) {
-      // Add more error stuff
-      // return plan;
-      return;
-    }
-
-    double runtime = 0;
-    GasMix bestMix = gasMixes[0];
-    double currentPressure = -1.0;
-
-    // currently does not take into account travel time between waypoints
-    for (var waypoint in decoWaypoints) {
-      double waypointTime = waypoint.time;
-      currentPressure = waypoint.pressure;
-      bestMix = getBestMix(gasMixes, currentPressure);
-      instantSchreiner(bestMix, waypointTime, currentPressure);
-      runtime = runtime + waypointTime;
-      double ceiling = calculateCeiling();
-      plan.add(DecompressionPlan('↗️', '${(currentPressure - 1) * 10} → ${(ceiling - 1) * 10}', runtime.toString(), runtime.toString(), '${bestMix.oxygen * 100}/${bestMix.helium * 100}', ''));
-    }
-
-    while (calculateCeiling() > surfacePressure + 0.1) {
-      // Ascent Portion
-      double ceiling = calculateCeiling();
-      double roundedCeiling = ceiling - ((ceiling - 1) % 0.3) + 0.3;
-      double timeAscending = (currentPressure - ceiling) / 1.0;
-      schreinerAscentDescent(bestMix, 1.0, timeAscending, currentPressure);
-      runtime = runtime + timeAscending;
-      plan.add(DecompressionPlan('↗️', '${(currentPressure - 1)* 10} → ${(roundedCeiling - 1) * 10}', timeAscending.toString(), runtime.toString(), '${bestMix.oxygen * 100}/${bestMix.helium * 100}', ''));
-      currentPressure = roundedCeiling;
-      // Stop Portion
-      bestMix = getBestMix(gasMixes, currentPressure);
-      double stopDuration = stopTime(bestMix, currentPressure, currentPressure - 0.31);
-      instantSchreiner(bestMix, stopDuration, currentPressure);
-      runtime = runtime + stopDuration;
-      plan.add(DecompressionPlan('🛑', '${(currentPressure - 1) * 10}', stopDuration.toString(), runtime.toString(), '${bestMix.oxygen * 100}/${bestMix.helium * 100}', ''));
+    for (var i = 0; i < 0; i++) {
+      tissueCompartments[i].resetTissueState();
     }
   }
 }
 
-// ➡️🔄↗️↘️🛑
+GasMix getBestMix(List<GasMix> gasMixes, ambientPressure) {
+  GasMix bestMix = gasMixes[0];
+  for (var gas in gasMixes) {
+    if (gas.oxygen >= bestMix.oxygen && gas.oxygen * ambientPressure <= 1.6) {
+      bestMix = gas;
+    }
+  }
+  return bestMix;
+}

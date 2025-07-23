@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import './gases.dart';
 import './waypoints.dart';
-import './buhlmann.dart';
+import './plan.dart';
 
 void main() {
   final List<Waypoint> waypoints = [];
   final List<Gas> gases = [];
-  final Buhlmann decompressionState = Buhlmann();
+  final DecompressionPlan plan = DecompressionPlan([], []);
 
   runApp(
     AppData(
       waypoints: waypoints,
       gases: gases,
-      decompressionState: decompressionState,
+      plan: plan,
       child: const MainApp()
     )
   );
@@ -21,13 +21,13 @@ void main() {
 class AppData extends InheritedWidget {
   final List<Waypoint> waypoints;
   final List<Gas> gases;
-  final Buhlmann decompressionState;
+  final DecompressionPlan plan;
 
   const AppData({
     super.key,
     required this.waypoints,
     required this.gases,
-    required this.decompressionState,
+    required this.plan,
     required super.child,
   });
 
@@ -73,10 +73,10 @@ class MainWindowDesktop extends StatefulWidget {
 class _MainWindowDesktopState extends State<MainWindowDesktop> {
   void _calculatePlan() {
     setState(() {
-      AppData.of(context).decompressionState.calculatePlan(
+      AppData.of(context).plan.copy(calculatePlan(
         AppData.of(context).gases,
         AppData.of(context).waypoints,
-      );
+      ));
     });
   }
 
@@ -113,62 +113,44 @@ class _MainWindowDesktopState extends State<MainWindowDesktop> {
               ),
               Expanded(
                 flex: 1,
-                child: TextButton(
-                  onPressed: _calculatePlan, 
-                  child: const Text('Calculate')
+                child: Container(
+                  padding: EdgeInsets.all(0.0),
+                  color: Colors.blue[900],
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 1,
+                        child: Container(
+                          padding: EdgeInsets.all(0.0),
+                          color: Colors.blue[900],
+                          child: Theme(
+                            data: ThemeData.dark(),
+                            child: Expanded(
+                              child: TextButton(
+                                onPressed: _calculatePlan, 
+                                child: const Text('Calculate'),
+                              ),
+                            ),
+                          )
+                        ),
+                      ),
+                    ]
+                  )
                 )
-              )
+              ),
             ],
           ),
         ),
         Expanded(
           flex: 3,
-          child: PlanItem(),
+          child: Column(
+            children: [
+              Expanded(flex: 1, child: PlanChart()),
+              Expanded(flex: 1, child: PlanTable()),
+            ],
+          ),
         ),
       ],
-    );
-  }
-}
-
-class PlanItem extends StatelessWidget {
-  const PlanItem({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final planData = AppData.of(context).decompressionState.plan;
-
-    return SelectionArea(
-      child: Table (
-        border: const TableBorder(horizontalInside: BorderSide(width: 0.1)),
-        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-        children: [
-          const TableRow (
-            decoration: BoxDecoration(
-              color: Colors.blueAccent,
-            ),
-            children: [
-              TableCell(child: Padding(padding: EdgeInsets.all(9.0), child: Text(''))),
-              TableCell(child: Padding(padding: EdgeInsets.all(9.0), child: Text('Depth'))),
-              TableCell(child: Padding(padding: EdgeInsets.all(9.0), child: Text('Duration'))),
-              TableCell(child: Padding(padding: EdgeInsets.all(9.0), child: Text('Runtime'))),
-              TableCell(child: Padding(padding: EdgeInsets.all(9.0), child: Text('Gas'))),
-              TableCell(child: Padding(padding: EdgeInsets.all(9.0), child: Text('Info'))),
-            ]
-          ),
-          ...planData.map((step) {
-            return TableRow(
-              children: [
-                TableCell(child: Padding(padding: const EdgeInsets.all(7.0), child: Text(step.icon, textAlign: TextAlign.center,))),
-                TableCell(child: Padding(padding: const EdgeInsets.all(7.0), child: Text(step.depth))),
-                TableCell(child: Padding(padding: const EdgeInsets.all(7.0), child: Text(step.duration))),
-                TableCell(child: Padding(padding: const EdgeInsets.all(7.0), child: Text(step.runtime))),
-                TableCell(child: Padding(padding: const EdgeInsets.all(7.0), child: Text(step.gas))),
-                TableCell(child: Padding(padding: const EdgeInsets.all(7.0), child: Text(step.info))),
-              ],
-            );
-          })
-        ]
-      )
     );
   }
 }
