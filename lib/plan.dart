@@ -113,10 +113,6 @@ DecompressionPlan calculatePlan(List<Gas> gases, List<Waypoint> waypoints) {
   return plan;
 }
 
-// ➡️🔄↗️↘️🛑
-
-// Keep way to handle to currentDepth -> targetDepth display
-
 class PlanTable extends StatelessWidget {
   const PlanTable({super.key});
 

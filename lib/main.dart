@@ -43,8 +43,22 @@ class AppData extends InheritedWidget {
   }
 }
 
-class MainApp extends StatelessWidget {
+class MainApp extends StatefulWidget {
   const MainApp({super.key});
+
+  @override
+  State<MainApp> createState() => _MainApp();
+}
+
+class _MainApp extends State<MainApp> {
+  void _calculatePlan() {
+    setState(() {
+      AppData.of(context).plan.copy(calculatePlan(
+        AppData.of(context).gases,
+        AppData.of(context).waypoints,
+      ));
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,29 +70,90 @@ class MainApp extends StatelessWidget {
         ),
       ),
       home: Scaffold(
-        body: MainWindowDesktop(),
+        body: OrientationBuilder(
+          builder: (context, orientation) {
+            if (orientation == Orientation.landscape) {
+              return MainWindowDesktop(calculatePlan: _calculatePlan);
+            } else {
+             //  return const MainWindowMobile();
+             return MainWindowMobile(calculatePlan: _calculatePlan);
+            }
+          }
+        ),
       ),
       title: 'Dive Planner',
     );
   }
 }
 
-class MainWindowDesktop extends StatefulWidget {
-  const MainWindowDesktop({super.key});
+class MainWindowMobile extends StatefulWidget {
+  final VoidCallback calculatePlan;
+
+  const MainWindowMobile({
+    super.key,
+    required this.calculatePlan,
+  });
 
   @override
-  State<MainWindowDesktop> createState() => _MainWindowDesktopState();
+  State<MainWindowMobile> createState() => _MainWindowMobile();
 }
 
-class _MainWindowDesktopState extends State<MainWindowDesktop> {
-  void _calculatePlan() {
-    setState(() {
-      AppData.of(context).plan.copy(calculatePlan(
-        AppData.of(context).gases,
-        AppData.of(context).waypoints,
-      ));
-    });
+class _MainWindowMobile extends State<MainWindowMobile> {
+  int currentPageIndex = 0;
+  
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      bottomNavigationBar: NavigationBar(
+        onDestinationSelected: (int index) {
+          setState(() {
+            currentPageIndex = index;
+          });
+          widget.calculatePlan();
+        },
+        selectedIndex: currentPageIndex,
+        destinations: const <Widget>[
+          NavigationDestination(
+            icon: Icon(Icons.air),
+            label: 'Gases',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.location_on),
+            label: 'Waypoints',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.analytics),
+            label: 'Result',
+          ),
+        ],
+      ),
+      body: <Widget>[
+        FormattedGasManager(),
+        FormattedWaypointManager(),
+        Column(
+          children: [
+            Expanded(
+              flex: 2,
+              child: PlanChart(),
+            ),
+            Expanded(
+              flex: 3,
+              child: PlanTable(),
+            ),
+          ],
+        )
+      ].elementAt(currentPageIndex),
+    );
   }
+}
+
+class MainWindowDesktop extends StatelessWidget {
+  final VoidCallback calculatePlan;
+
+  const MainWindowDesktop({
+    super.key,
+    required this.calculatePlan,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -91,52 +166,15 @@ class _MainWindowDesktopState extends State<MainWindowDesktop> {
             children: [
               Expanded(
                 flex: 10,
-                child: Container(
-                  padding: EdgeInsets.all(16.0),
-                  color: Colors.blue[900],
-                  child: Theme(
-                    data: ThemeData.dark(),
-                    child: GasManager(),
-                  ),
-                )
+                child: FormattedGasManager(),
               ),
               Expanded(
                 flex: 10,
-                child: Container(
-                  padding: EdgeInsets.all(16.0),
-                  color: Colors.blue[800],
-                  child: Theme(
-                    data: ThemeData.dark(),
-                    child: WaypointManager(),
-                  ),
-                )
+                child: FormattedWaypointManager(),
               ),
               Expanded(
                 flex: 1,
-                child: Container(
-                  padding: EdgeInsets.all(0.0),
-                  color: Colors.blue[900],
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 1,
-                        child: Container(
-                          padding: EdgeInsets.all(0.0),
-                          color: Colors.blue[900],
-                          child: Theme(
-                            data: ThemeData.dark(),
-                            child: Expanded(
-                              child: TextButton(
-                                onPressed: _calculatePlan, 
-                                child: const Text('Calculate'),
-                              ),
-                            ),
-                          )
-                        ),
-                      ),
-                    ]
-                  )
-                )
+                child: FormattedCalculateButton(calculatePlan: calculatePlan),
               ),
             ],
           ),
@@ -151,6 +189,74 @@ class _MainWindowDesktopState extends State<MainWindowDesktop> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class FormattedCalculateButton extends StatelessWidget {
+  final VoidCallback calculatePlan;
+
+  const FormattedCalculateButton({
+    super.key,
+    required this.calculatePlan,
+  });
+
+  @override build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(0.0),
+      color: Colors.blue[900],
+      child: Row(
+        children: [
+          Expanded(
+            flex: 1,
+            child: Container(
+              padding: EdgeInsets.all(0.0),
+              color: Colors.blue[900],
+              child: Theme(
+                data: ThemeData.dark(),
+                child: Expanded(
+                  child: TextButton(
+                    onPressed: calculatePlan, 
+                    child: const Text('Calculate'),
+                  ),
+                ),
+              )
+            ),
+          ),
+        ]
+      )
+    );
+  }
+}
+
+class FormattedWaypointManager extends StatelessWidget {
+  const FormattedWaypointManager({super.key});
+
+  @override 
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(16.0),
+      color: Colors.blue[800],
+      child: Theme(
+        data: ThemeData.dark(),
+        child: WaypointManager(),
+      ),
+    );
+  }
+}
+
+class FormattedGasManager extends StatelessWidget {
+  const FormattedGasManager({super.key});
+
+  @override 
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(16.0),
+      color: Colors.blue[900],
+      child: Theme(
+        data: ThemeData.dark(),
+        child: GasManager(),
+      ),
     );
   }
 }

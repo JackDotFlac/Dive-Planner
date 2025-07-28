@@ -19,12 +19,6 @@ class GasManager extends StatefulWidget {
 class _GasManager extends State<GasManager> {
   List<Gas> _gases = [];
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _gases = AppData.of(context).gases;
-  }
-
   void _addGas() {
     setState(() {
       _gases.add(Gas());
@@ -41,12 +35,9 @@ class _GasManager extends State<GasManager> {
   }
 
   @override
-  void dispose() {
-    for (var gas in _gases) {
-      gas.oxygenController.dispose();
-      gas.heliumController.dispose();
-    }
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _gases = AppData.of(context).gases;
   }
 
   @override
