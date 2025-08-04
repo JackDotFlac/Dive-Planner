@@ -63,7 +63,7 @@ DecompressionPlan calculatePlan(List<Gas> gases, List<Waypoint> waypoints) {
   // currently does not take into account travel time between waypoints
   for (var waypoint in decoWaypoints) {
     double timeDescending = (currentPressure - waypoint.pressure).abs() / 1.0;
-    decoState.schreinerAscentDescent(bestMix, 1.0, timeDescending, currentPressure);
+    decoState.slopedSchreiner(bestMix, 1.0, timeDescending, false);
 
     plan.decoPlanGraph.add(DecompressionPlanGraph(pressureToDisplay(currentPressure).toDouble(), runtime));
     runtime = runtime + timeDescending;
@@ -83,12 +83,12 @@ DecompressionPlan calculatePlan(List<Gas> gases, List<Waypoint> waypoints) {
     plan.decoPlanGraph.add(DecompressionPlanGraph(pressureToDisplay(currentPressure).toDouble(), runtime));
   }
 
-  while (decoState.calculateCeiling() > surfacePressure + 0.1) {
+  while (decoState.ceiling() > decoState.decoSettings.surfacePressure + 0.1) {
     // Ascent Portion
-    double ceiling = decoState.calculateCeiling();
+    double ceiling = decoState.ceiling();
     double roundedCeiling = ceiling - ((ceiling - 1) % 0.3) + 0.3;
     double timeAscending = (currentPressure - ceiling) / 1.0;
-    decoState.schreinerAscentDescent(bestMix, 1.0, timeAscending, currentPressure);
+    decoState.slopedSchreiner(bestMix, 1.0, timeAscending, false);
 
     plan.decoPlanGraph.add(DecompressionPlanGraph(pressureToDisplay(currentPressure).toDouble(), runtime));
     runtime = runtime + timeAscending;

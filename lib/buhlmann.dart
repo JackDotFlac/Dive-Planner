@@ -2,8 +2,6 @@ import 'dart:math';
 import 'gases.dart';
 import 'waypoints.dart';
 
-const surfacePressure = 1.0; // remove to allow altitude diving
-
 class GasMix {
   double oxygen;
   double helium;
@@ -34,162 +32,195 @@ DecoWaypoint decoWaypointFromWaypoint(Waypoint waypoint) {
   return DecoWaypoint(time, pressure);
 }
 
-class TissueCompartments {
-  late double helium;
-  late double nitrogen;
+// delete above this line
 
-  resetTissueState() {
-    helium = 0.0;
-    nitrogen = 0.79;
-  }
+class DecompressionSettings {
+  double waterVapourPressure;
+  double surfacePressure;
+  double ascentRate;
+  double gfLow;
+  double gfHigh;
+  double maxNDL; // breaks formatting as can be weird to read otherwise
+  double firstStop = 1;
 
-  TissueCompartments() {
-    resetTissueState();
-  }
+  DecompressionSettings(this.waterVapourPressure, this.surfacePressure, this.ascentRate, this.gfLow, this.gfHigh, this.maxNDL);
 }
 
-class CompartmentGasParameters {
-  double halfTime;
+class CompartmentGas {
+  double halftime;
   double aValue;
   double bValue;
+  double tissueLoading;
+  DecompressionSettings decoSettings;
 
-  CompartmentGasParameters(this.halfTime, this.aValue, this.bValue);
+  CompartmentGas(this.halftime, this.aValue, this.bValue, this.tissueLoading, this.decoSettings);
+
+  // might be worth moving this function elsewhere for the sake of organisation.
+  double gasPressure(gasFraction, ambientPressure) {
+    return (ambientPressure - decoSettings.waterVapourPressure) * gasFraction;
+  }
+
+  void instantSchreiner(double gasFraction, double duration, double ambientPressure) {
+    tissueLoading = tissueLoading 
+    + ((gasPressure(ambientPressure, gasFraction) - tissueLoading) 
+    * (1 - pow(2, (-duration / halftime))));
+  }
+
+  // full form of the schreiner equation
+  void slopedSchreiner(double gasFraction, double duration, double ambientPressure, bool ascending) {
+    double R = gasFraction * decoSettings.ascentRate;
+    if (ascending) R = R * -1;
+    double k = ln2 / halftime;
+    double currentGasPressure = gasPressure(gasFraction, ambientPressure);
+    tissueLoading = currentGasPressure + (R * (duration - (1.0 / k)))
+    - ((currentGasPressure - tissueLoading - (R / k)) * exp(-k * duration));
+  }
+
+  double stopTime(double gasFraction, double ambientPressure, double targetPressure) {
+    double mValue = aValue + (targetPressure / bValue);
+    double currentGasPressure = gasPressure(gasFraction, ambientPressure);
+    if (currentGasPressure < mValue && mValue < tissueLoading) {
+      double k = ln2 / halftime;
+      return (-1.0 / k) * log((currentGasPressure - mValue) / (currentGasPressure - tissueLoading));
+    }
+    return 0.0;
+  }
+
+  // add gradient factors
+  double noDecompressionLimit(double gasFraction, double ambientPressure) {
+    double currentGasPressure = gasPressure(gasFraction, ambientPressure);
+    double mValue0 = aValue + (decoSettings.surfacePressure / bValue);
+    if (currentGasPressure > mValue0 && mValue0 > tissueLoading) {
+      double k = ln2 / halftime;
+      return (-1.0 / k) * log((currentGasPressure - mValue0) / (currentGasPressure - tissueLoading));
+    }
+    return decoSettings.maxNDL;
+  }
 }
 
-class CompartmentParameters {
-  late CompartmentGasParameters nitrogen;
-  late CompartmentGasParameters helium;
+class Compartment {
+  late CompartmentGas nitrogen;
+  late CompartmentGas helium;
+  DecompressionSettings decoSettings;
 
-  CompartmentParameters(nitrogenHalfTime, nitrogenAValue, nitrogenBValue, heliumHalfTime, heliumAValue, heliumBValue) {
-    nitrogen = CompartmentGasParameters(nitrogenHalfTime, nitrogenAValue, nitrogenBValue);
-    helium = CompartmentGasParameters(heliumHalfTime, heliumAValue, heliumBValue);
+  Compartment(halftimeN2, aValueN2, bValueN2, nitrogenLoading, halftimeHe, aValueHe, bValueHe, heliumLoading, this.decoSettings) {
+    nitrogen = CompartmentGas(halftimeN2, aValueN2, bValueN2, nitrogenLoading, decoSettings);
+    helium = CompartmentGas(halftimeHe, aValueHe, bValueHe, heliumLoading, decoSettings);
   }
+
+  void instantSchreiner(GasMix gas, double duration, double ambientPressure) {
+    nitrogen.instantSchreiner(gas.nitrogen, duration, ambientPressure);
+    helium.instantSchreiner(gas.helium, duration, ambientPressure);
+  }
+
+  void slopedSchreiner(GasMix gas, double duration, double ambientPressure, bool ascending) {
+    nitrogen.slopedSchreiner(gas.nitrogen, duration, ambientPressure, ascending);
+    helium.slopedSchreiner(gas.helium, duration, ambientPressure, ascending);
+  }
+
+  double stopTime(GasMix gas, double ambientPressure, double targetPressure) {
+    return max(nitrogen.stopTime(gas.nitrogen, ambientPressure, targetPressure),
+    helium.stopTime(gas.helium, ambientPressure, targetPressure));
+  }
+
+  double noDecompressionLimit(GasMix gas, double ambientPressure) {
+    return min(nitrogen.noDecompressionLimit(gas.nitrogen, ambientPressure),
+    helium.noDecompressionLimit(gas.helium, ambientPressure));
+  }
+
+  double gradientFactor(double firstStop, double currentStopDepth) {
+    double gfSlope = (decoSettings.gfHigh - decoSettings.gfLow) / (decoSettings.surfacePressure - firstStop);
+    double gf = (gfSlope * currentStopDepth) + decoSettings.gfHigh;
+    print("% gflow $decoSettings.gfLow, gfhigh $decoSettings.gfHigh, firstStop $firstStop, currentStopDepth $currentStopDepth, slope $gfSlope, gf $gf");
+    return gf;
+  }
+
+  double ceiling() {
+    double A = ((nitrogen.aValue * nitrogen.tissueLoading) + (helium.aValue * helium.tissueLoading)) / (nitrogen.tissueLoading + helium.tissueLoading);
+    double B = ((nitrogen.bValue * nitrogen.tissueLoading) + (helium.bValue * helium.tissueLoading)) / (nitrogen.tissueLoading + helium.tissueLoading);
+    return ((nitrogen.tissueLoading + helium.tissueLoading) - A) * B;
+  }
+
+  /**
+  double ceiling() {
+    double A = ((nitrogen.aValue * nitrogen.tissueLoading) + (helium.aValue * helium.tissueLoading)) / (nitrogen.tissueLoading + helium.tissueLoading);
+    double B = ((nitrogen.bValue * nitrogen.tissueLoading) + (helium.bValue * helium.tissueLoading)) / (nitrogen.tissueLoading + helium.tissueLoading);
+    double rawCeiling = ((nitrogen.tissueLoading + helium.tissueLoading) - A) * B;
+    double firstStop = ((nitrogen.tissueLoading + helium.tissueLoading) - (decoSettings.gfLow * A)) / ((decoSettings.gfLow / B) - decoSettings.gfLow + 1);
+    if (firstStop > decoSettings.firstStop) {
+      decoSettings.firstStop = firstStop;
+    }
+    double stopGf = gradientFactor(rawCeiling, decoSettings.firstStop);
+    double gfCeiling = ((nitrogen.tissueLoading + helium.tissueLoading) - (stopGf * A)) / ((stopGf / B) - stopGf + 1);
+    print('$stopGf, $rawCeiling, $gfCeiling');
+    return gfCeiling;
+  }
+  */
 }
 
 class Buhlmann {
-  // Placeholder
-  List<double> nitrogenHalfTime = [5.0000, 8.0000, 12.500, 18.500, 27.000, 38.300, 54.300, 77.000, 109.00, 146.00, 187.00, 239.00, 305.00, 390.00, 498.00, 635.00];
-  List<double> nitrogenAValue = [1.1696, 1.0000, 0.8618, 0.7562, 0.6200, 0.5043, 0.4410, 0.4000, 0.3750, 0.3500, 0.3295, 0.3065, 0.2835, 0.2610, 0.2480, 0.2327];
-  List<double> nitrogenBValue = [0.5578, 0.6514, 0.7222, 0.7825, 0.8126, 0.8434, 0.8693, 0.8910, 0.9092, 0.9222, 0.9319, 0.9403, 0.9477, 0.9544, 0.9602, 0.9653];
-  List<double> halfTime = [1.8800, 3.0200, 4.7200, 6.9900, 10.210, 14.480, 20.530, 29.110, 41.200, 55.190, 70.690, 90.340, 115.20, 147.42, 188.24, 240.03];
-  List<double> heliumAValue = [1.6189, 1.3830, 1.1919, 1.0458, 0.9220, 0.8205, 0.7305, 0.6502, 0.5950, 0.5545, 0.5333, 0.5189, 0.5181, 0.5176, 0.5172, 0.5119];
-  List<double> heliumBValue = [0.4770, 0.5747, 0.6527, 0.7223, 0.7582, 0.7957, 0.8279, 0.8553, 0.8757, 0.8903, 0.8997, 0.9073, 0.9122, 0.9171, 0.9217, 0.9267];
-  List<CompartmentParameters> compartmentParameters = [];
-  List<TissueCompartments> tissueCompartments = [];
-
-  // Placeholder variables, these should go info their own settings class ASAP
-  static const waterVapourPressure = 0.0627;
-  static const log2 = 0.69314718056;
+  DecompressionSettings decoSettings = DecompressionSettings(0.0627, 1, 1, 0.3, 0.7, 999);
+  List<Compartment> compartments = [];
+  double maxCeiling = 0.0;
 
   Buhlmann() {
-    for (var i = 0; i < 16; i++) {
-      compartmentParameters.add(
-        CompartmentParameters(
-          nitrogenHalfTime[i], nitrogenAValue[i], nitrogenBValue[i], halfTime[i], heliumAValue[i], heliumBValue[i]
-        )
-      );
-    }
-    for (var i = 0; i < 16; i++) {
-      tissueCompartments.add(
-        // Also a placeholder, impliment a way to load tissue... loading...
-        TissueCompartments()
-      );
+    List<double> halftimeN2 = [5.0000, 8.0000, 12.500, 18.500, 27.000, 38.300, 54.300, 77.000, 109.00, 146.00, 187.00, 239.00, 305.00, 390.00, 498.00, 635.00];
+    List<double> aValueN2 = [1.1696, 1.0000, 0.8618, 0.7562, 0.6200, 0.5043, 0.4410, 0.4000, 0.3750, 0.3500, 0.3295, 0.3065, 0.2835, 0.2610, 0.2480, 0.2327];
+    List<double> bValueN2 = [0.5578, 0.6514, 0.7222, 0.7825, 0.8126, 0.8434, 0.8693, 0.8910, 0.9092, 0.9222, 0.9319, 0.9403, 0.9477, 0.9544, 0.9602, 0.9653];
+    List<double> halftimeHe = [1.8800, 3.0200, 4.7200, 6.9900, 10.210, 14.480, 20.530, 29.110, 41.200, 55.190, 70.690, 90.340, 115.20, 147.42, 188.24, 240.03];
+    List<double> aValueHe = [1.6189, 1.3830, 1.1919, 1.0458, 0.9220, 0.8205, 0.7305, 0.6502, 0.5950, 0.5545, 0.5333, 0.5189, 0.5181, 0.5176, 0.5172, 0.5119];
+    List<double> bValueHe = [0.4770, 0.5747, 0.6527, 0.7223, 0.7582, 0.7957, 0.8279, 0.8553, 0.8757, 0.8903, 0.8997, 0.9073, 0.9122, 0.9171, 0.9217, 0.9267];
+
+    for (int i = 0; i < 16; i++) {
+      compartments.add(Compartment(
+        halftimeN2[i], 
+        aValueN2[i],
+        bValueN2[i],
+        0.79, // PLACEHOLDER
+        halftimeHe[i], 
+        aValueHe[i],
+        bValueHe[i],
+        0.0, // PLACEHOLDER
+        decoSettings
+      ));
     }
   }
 
-  instantSchreiner(GasMix gas, double deltaTime, double ambientPressure) {
-    for (var i = 0; i < 16; i++) {
-      double nitrogenPressure = (ambientPressure - waterVapourPressure) * gas.nitrogen;
-      tissueCompartments[i].nitrogen = tissueCompartments[i].nitrogen + ((nitrogenPressure - tissueCompartments[i].nitrogen) * (1 - pow(2, (-deltaTime / compartmentParameters[i].nitrogen.halfTime))));
-      double heliumPressure = (ambientPressure - waterVapourPressure) * gas.helium;
-      tissueCompartments[i].helium = tissueCompartments[i].helium + ((heliumPressure - tissueCompartments[i].helium) * (1 - pow(2, (-deltaTime / compartmentParameters[i].helium.halfTime))));
+  void instantSchreiner(GasMix gas, double duration, double ambientPressure) {
+    for (var i in compartments) {
+      i.instantSchreiner(gas, duration, ambientPressure);
     }
   }
 
-  schreinerAscentDescent(GasMix gas, double ascentRate, double deltaTime, double ambientPressure) {
-    for (var i = 0; i < 16; i++) {
-        // nitrogen
-        double nitrogenPressure = (ambientPressure - waterVapourPressure) * gas.nitrogen;
-        double nitrogenR = gas.nitrogen * -1 * ascentRate;
-        double nitrogenk = log2 / compartmentParameters[i].nitrogen.halfTime;
-        tissueCompartments[i].nitrogen = nitrogenPressure + (nitrogenR * (deltaTime - (1.0 / nitrogenk))) - ((nitrogenPressure - tissueCompartments[i].nitrogen - (nitrogenR / nitrogenk)) * exp(-nitrogenk * deltaTime));
-        // helium
-        double heliumPressure = (ambientPressure - waterVapourPressure) * gas.helium;
-        double heliumR = gas.helium * -1 * ascentRate;
-        double heliumk = log2 / compartmentParameters[i].helium.halfTime;
-        tissueCompartments[i].helium = heliumPressure + (heliumR * (deltaTime - (1.0 / heliumk))) - ((heliumPressure - tissueCompartments[i].helium - (heliumR / heliumk)) * exp(-heliumk * deltaTime));
+  void slopedSchreiner(GasMix gas, double duration, double ambientPressure, bool ascending) {
+    for (var i in compartments) {
+      i.slopedSchreiner(gas, duration, ambientPressure, ascending);
     }
   }
 
   double stopTime(GasMix gas, double ambientPressure, double targetPressure) {
-    double time = 0.0;
-    for (var i = 0; i < 16; i++) {
-        // nitrogen
-        double nitrogenPressure = (ambientPressure - waterVapourPressure) * gas.nitrogen;
-        double mValueN2 = compartmentParameters[i].nitrogen.aValue + (targetPressure / compartmentParameters[i].nitrogen.bValue);
-        if (nitrogenPressure < mValueN2 && mValueN2 < tissueCompartments[i].nitrogen) {
-            double k = log2 / compartmentParameters[i].nitrogen.halfTime;
-            double stopTimeN2 = (-1.0 / k) * log((nitrogenPressure - mValueN2) / (nitrogenPressure - tissueCompartments[i].nitrogen));
-            if (stopTimeN2 > time) {
-                time = stopTimeN2;
-            }
-        }
-        // helium
-        double heliumPressure = (ambientPressure - waterVapourPressure) * gas.helium;
-        double mValueHE = compartmentParameters[i].helium.aValue + (targetPressure / compartmentParameters[i].helium.bValue);
-        if (heliumPressure < mValueHE && mValueHE < tissueCompartments[i].helium) {
-            double k = log2 / compartmentParameters[i].helium.halfTime;
-            double stopTimeHE = (-1.0 / k) * log((heliumPressure - mValueHE) / (heliumPressure - tissueCompartments[i].helium));
-            if (stopTimeHE > time) {
-                time = stopTimeHE;
-            }
-        }
+    double maxStopTime = 0.0;
+    for (var i in compartments) {
+      maxStopTime = max(maxStopTime, i.stopTime(gas, ambientPressure, targetPressure));
     }
-    return time;
+    return maxStopTime;
   }
 
-  double noDecompressionLimit(GasMix gas, double ambientPressure) {
-    double time = 999.0; // If NDL is higher than this, it's not worth knowing
-    for (var i = 0; i < 16; i++) {
-        // nitrogen
-        double nitrogenPressure = (ambientPressure - waterVapourPressure) * gas.nitrogen;
-        double mValue0N2 = compartmentParameters[i].nitrogen.aValue + (surfacePressure / compartmentParameters[i].nitrogen.bValue);
-        if (nitrogenPressure > mValue0N2 && mValue0N2 > tissueCompartments[i].nitrogen) {
-            double k = log2 / compartmentParameters[i].nitrogen.halfTime;
-            double noDecompressionLimitTime = (-1.0 / k) * log((nitrogenPressure - mValue0N2) / (nitrogenPressure - tissueCompartments[i].nitrogen));
-            if (noDecompressionLimitTime < time) {
-                time = noDecompressionLimitTime;
-            }
-        }
-        // helium
-        double heliumPressure = (ambientPressure - waterVapourPressure) * gas.helium;
-        double mValue0HE = compartmentParameters[i].helium.aValue + (surfacePressure / compartmentParameters[i].helium.bValue);
-        if (heliumPressure > mValue0HE && mValue0HE > tissueCompartments[i].helium) {
-            double k = log2 / compartmentParameters[i].helium.halfTime;
-            double noDecoLimit = (-1.0 / k) * log((heliumPressure - mValue0HE) / (heliumPressure - tissueCompartments[i].helium));
-            if (noDecoLimit < time) {
-                time = noDecoLimit;
-            }
-        }
+  double noDecompressionLimit(gas, ambientPressure) {
+    double minNDL = decoSettings.maxNDL;
+    for (var i in compartments) {
+      minNDL = min(minNDL, i.noDecompressionLimit(gas, ambientPressure));
     }
-    return time;
+    return minNDL;
   }
 
-  double calculateCeiling() {
-      double maxCeiling = 0.0;
-      for (var i = 0; i < 16; i++) {
-          double A = ((compartmentParameters[i].nitrogen.aValue * tissueCompartments[i].nitrogen) + (compartmentParameters[i].helium.aValue * tissueCompartments[i].helium)) / (tissueCompartments[i].nitrogen + tissueCompartments[i].helium);
-          double B = ((compartmentParameters[i].nitrogen.bValue * tissueCompartments[i].nitrogen) + (compartmentParameters[i].helium.bValue * tissueCompartments[i].helium)) / (tissueCompartments[i].nitrogen + tissueCompartments[i].helium);
-          double ceiling = ((tissueCompartments[i].nitrogen + tissueCompartments[i].helium) - A) * B;
-          if (ceiling > maxCeiling) maxCeiling = ceiling;
-      }
-      return maxCeiling;
-  }
-
-  void resetDecompressionState() {
-    for (var i = 0; i < 0; i++) {
-      tissueCompartments[i].resetTissueState();
+  double ceiling() {
+    double ceiling = 0.0;
+    for (var i in compartments) {
+      ceiling = max(ceiling, i.ceiling());
     }
+    return ceiling;
+    //return currentCeiling;
   }
 }
 
