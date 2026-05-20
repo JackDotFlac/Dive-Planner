@@ -60,7 +60,6 @@ DecompressionPlan calculatePlan(List<Gas> gases, List<Waypoint> waypoints) {
   GasMix bestMix = gasMixes[0];
   double currentPressure = 1.0;
 
-  // currently does not take into account travel time between waypoints
   for (var waypoint in decoWaypoints) {
     double timeDescending = (currentPressure - waypoint.pressure).abs() / 1.0;
     decoState.slopedSchreiner(bestMix, 1.0, timeDescending, false);
